@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Captura 360 - Grade de Alinhamento</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: sans-serif;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* Container da câmera */
+        #camera-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Interface de sobreposição (HUD) */
+        .hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 30px 20px;
+        }
+
+        .painel-topo {
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 10;
+        }
+
+        /* Mira central fixa do celular */
+        .mira-central {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 40px;
+            height: 40px;
+            border: 3px solid #00ffcc;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 5;
+        }
+        .mira-central::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 6px;
+            height: 6px;
+            background: #00ffcc;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* O "Mundo Virtual" das bolinhas guia */
+        #espaco-3d {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            perspective: 600px;
+            overflow: hidden;
+        }
+
+        .bolinha-guia {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.4);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: background 0.2s;
+        }
+
+        .bolinha-guia.capturada {
+            background: #00ff00 !important;
+            border-color: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        .bolinha-guia.proxima {
+            background: #ffcc00;
+            border-color: #ffcc00;
+            transform: translate(-50%, -50%) scale(1.3);
+        }
+
+        /* Botão para ativar sensores no iOS */
+        #btn-permissao {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            background: #00adb5;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            pointer-events: auto;
+            z-index: 20;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="camera-container">
+        <video id="webcam" autoplay playsinline muted></video>
+        
+        <div id="espaco-3d"></div>
+
+        <div class="mira-central"></div>
+
+        <div class="hud">
+            <div class="painel-topo">
+                <h2 id="contador">Fotos: 0 / 42</h2>
+                <p id="instrucao">Alinhe a mira verde com as bolinhas cor-de-rosa</p>
+                <p id="debug" style="font-size: 11px; color: #aaa; margin-top: 5px;">Aguardando Sensores...</p>
+            </div>
+            
+            <button id="btn-permissao" onclick="inicializarSensores()">Ativar Giroscópio</button>
+        </div>
+    </div>
+
+    <script>
+        const espaco3D = document.getElementById('espaco-3d');
+        const contadorTxt = document.getElementById('contador');
+        const debugTxt = document.getElementById('debug');
+        const btnPermissao = document.getElementById('btn-permissao');
+        const video = document.getElementById('webcam');
+
+        let fotosCapturadas = 0;
+        let listaPontos = [];
+        
+        // Configuração da Grade (3 fileiras horizontais de fotos para cobrir a imersão)
+        // Fileira 1: Olhando 30° para cima | Fileira 2: Linha dos olhos (0°) | Fileira 3: Olhando 30° para baixo
+        const inclinacoes = [-30, 0, 30]; 
+        const fotosPorFileira = 14; // 14 fotos por volta x 3 fileiras = 42 fotos totais (ótimo para sobreposição)
+
+        // Inicializa a árvore de pontos a capturar
+        function gerarGradePontos() {
+            espaco3D.innerHTML = '';
+            listaPontos = [];
+            
+            inclinacoes.forEach(incl => {
+                for (let i = 0; i < fotosPorFileira; i++) {
+                    // Distribui os ângulos horizontais uniformemente de -180 a 180 graus
+                    let rotacaoh = (-180 + (360 / fotosPorFileira) * i);
+                    
+                    // Cria o elemento visual da bolinha
+                    const div = document.createElement('div');
+                    div.className = 'bolinha-guia';
+                    espaco3D.appendChild(div);
+
+                    listaPontos.push({
+                        id: listaPontos.length,
+                        pitch: incl,      // Inclinação para cima/baixo desejada
+                        yaw: rotacaoh,    // Rotação esquerda/direita desejada
+                        capturado: false,
+                        element: div
+                    });
+                }
+            });
+            contadorTxt.innerText = `Fotos: 0 / ${listaPontos.length}`;
+        }
+
+        // Liga a câmera do celular
+        async function iniciarCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment" },
+                    audio: false
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                alert("Erro ao acessar a câmera traseira: " + err);
+            }
+        }
+
+        // Trata a permissão de segurança para sensores (Exigido pelo iOS/Safari)
+        function inicializarSensores() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            window.addEventListener('deviceorientation', lidarComMovimento, true);
+                            btnPermissao.style.display = 'none';
+                        }
+                    }).catch(console.error);
+            } else {
+                // Android e navegadores desktop comuns
+                window.addEventListener('deviceorientation', lidarComMovimento, true);
+                btnPermissao.style.display = 'none';
+            }
+            iniciarCamera();
+            gerarGradePontos();
+        }
+
+        // Monitora o movimento do giroscópio e atualiza a posição das bolinhas na tela
+        function lidarComMovimento(event) {
+            // gamma: inclinação lateral | beta: inclinação frente/trás | alpha: bússola/direção
+            let b = event.beta;  
+            let a = event.alpha; 
+
+            // Normaliza os valores de orientação atuais do celular
+            let anguloAtualPitch = b - 70; // Ajuste fino baseado na pegada vertical padrão do celular
+            let anguloAtualYaw = a;
+
+            if(anguloAtualYaw > 180) anguloAtualYaw -= 360;
+
+            debugTxt.innerText = `Rot: ${Math.round(anguloAtualYaw)}° | Incl: ${Math.round(anguloAtualPitch)}°`;
+
+            const larguraTela = window.innerWidth;
+            const alturaTela = window.innerHeight;
+
+            // Sensibilidade do movimento na tela (pixels por grau)
+            const sensibilidadeX = larguraTela / 60; 
+            const sensibilidadeY = alturaTela / 60;
+
+            listaPontos.forEach(ponto => {
+                if (ponto.capturado) return;
+
+                // Calcula a distância angular entre a mira do celular e o ponto alvo
+                let diffX = ponto.yaw - anguloAtualYaw;
+                let diffY = ponto.pitch - anguloAtualPitch;
+
+                // Correção para que a rotação horizontal faça a volta completa de forma fluida
+                if (diffX > 180) diffX -= 360;
+                if (diffX < -180) diffX += 360;
+
+                // Converte a diferença de ângulos em coordenadas de pixel na tela
+                let posX = (larguraTela / 2) + (diffX * sensibilidadeX);
+                let posY = (alturaTela / 2) + (diffY * sensibilidadeY);
+
+                // Se o ponto estiver dentro do campo visual da tela, mostra ele
+                if (posX > 0 && posX < larguraTela && posY > 0 && posY < alturaTela) {
+                    ponto.element.style.display = 'block';
+                    ponto.element.style.left = `${posX}px`;
+                    ponto.element.style.top = `${posY}px`;
+
+                    // Margem de tolerância para capturar (se a mira estiver muito perto da bolinha)
+                    const margemErroPixels = 20; 
+                    let distanciaDaMira = Math.sqrt(Math.pow(posX - (larguraTela/2), 2) + Math.pow(posY - (alturaTela/2), 2));
+
+                    if (distanciaDaMira < margemErroPixels) {
+                        ponto.element.classList.add('proxima');
+                        
+                        // DISPARO AUTOMÁTICO: Captura a foto daquela posição
+                        ponto.capturado = true;
+                        ponto.element.classList.remove('proxima');
+                        ponto.element.classList.add('capturada');
+                        
+                        vibrarCelular();
+                        fotosCapturadas++;
+                        contadorTxt.innerText = `Fotos: ${fotosCapturadas} / ${listaPontos.length}`;
+
+                        if (fotosCapturadas === listaPontos.length) {
+                            document.getElementById('instrucao').innerText = "¡Excelente! Todas as fotos foram coletadas.";
+                            alert("Sucesso! Você coletou os dados visuais de todos os ângulos 360.");
+                        }
+                    }
+                } else {
+                    // Esconde pontos que estão "atrás" ou muito fora do campo de visão atual do celular
+                    ponto.element.style.display = 'none';
+                }
+            });
+        }
+
+        function vibrarCelular() {
+            if (navigator.vibrate) {
+                navigator.vibrate(100); // Pequeno feedback tátil no bolso do usuário ao travar uma foto
+            }
+        }
+    </script>
+</body>
+</html>
