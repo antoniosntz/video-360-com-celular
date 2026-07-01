@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio 360 - Creator App</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* Menu de Navegação Inferior */
+        nav {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            height: 60px;
+            background: #1e1e1e;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            border-top: 1px solid #333;
+            z-index: 10;
+        }
+
+        nav button {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 10px;
+        }
+
+        nav button.active {
+            color: #00adb5;
+            font-weight: bold;
+        }
+
+        /* Telas do App */
+        .screen {
+            display: none;
+            width: 100vw;
+            height: calc(100vh - 60px);
+            position: relative;
+        }
+
+        .screen.active {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Tela 1: Captura/Câmera */
+        #video-preview {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #000;
+        }
+
+        .hud-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            pointer-events: none;
+        }
+
+        .instruction {
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        /* Guia visual para o usuário girar */
+        .target-guide {
+            width: 80px;
+            height: 80px;
+            border: 4px dashed #00adb5;
+            border-radius: 50%;
+            animation: spin 4s linear infinite;
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        .record-btn {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: red;
+            border: 5px solid white;
+            cursor: pointer;
+            pointer-events: auto;
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+        }
+
+        .record-btn.recording {
+            animation: pulse 1s infinite alternate;
+            background: #fff;
+            border-color: red;
+        }
+
+        @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.1); } }
+
+        /* Tela 2: Player 360 */
+        a-scene {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        .player-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.6);
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 5;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="capture-screen" class="screen active">
+        <video id="video-preview" autoplay playsinline muted></video>
+        
+        <div class="hud-overlay">
+            <div class="instruction">Alinhe o celular e gire devagar para os lados</div>
+            <div class="target-guide"></div>
+            <button class="record-btn" id="record-trigger"></button>
+        </div>
+    </div>
+
+    <div id="gallery-screen" class="screen">
+        <div class="player-info">
+            <h3>Modo Preview 360°</h3>
+            <p>Clique e arraste para olhar ao redor</p>
+        </div>
+        
+        <a-scene embedded vr-mode-ui="enabled: false">
+            <a-assets>
+                <video id="video360" src="https://bitdash-a.akamaihd.net/content/playkit/360/360.mp4" 
+                       autoplay loop crossorigin="anonymous" playsinline webkit-playsinline></video>
+            </a-assets>
+
+            <a-videosphere src="#video360" rotation="0 -90 0"></a-videosphere>
+
+            <a-entity camera look-controls></a-entity>
+        </a-scene>
+    </div>
+
+    <nav>
+        <button id="nav-capture" class="active" onclick="switchScreen('capture')">Câmera</button>
+        <button id="nav-gallery" onclick="switchScreen('gallery')">Galeria 360°</button>
+    </nav>
+
+    <script>
+        // Lógica para alternar entre as telas da interface
+        function switchScreen(screenName) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+
+            const video360 = document.getElementById('video360');
+
+            if (screenName === 'capture') {
+                document.getElementById('capture-screen').classList.add('active');
+                document.getElementById('nav-capture').classList.add('active');
+                video360.pause(); // Pausa o vídeo 360 para poupar hardware
+                startCamera();
+            } else {
+                document.getElementById('gallery-screen').classList.add('active');
+                document.getElementById('nav-gallery').classList.add('active');
+                video360.play(); // Dá play no vídeo 360
+                stopCamera();
+            }
+        }
+
+        // Acessar a câmera real do celular do usuário
+        let streamInstance = null;
+        async function startCamera() {
+            try {
+                streamInstance = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment" }, // Usa a câmera traseira
+                    audio: false 
+                });
+                document.getElementById('video-preview').srcObject = streamInstance;
+            } catch (err) {
+                console.error("Erro ao acessar a câmera: ", err);
+                alert("Para simular a câmera, permita o acesso a ela no navegador.");
+            }
+        }
+
+        function stopCamera() {
+            if (streamInstance) {
+                streamInstance.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        // Lógica visual do botão de gravar
+        const recordBtn = document.getElementById('record-trigger');
+        recordBtn.addEventListener('click', () => {
+            recordBtn.classList.toggle('recording');
+            if(recordBtn.classList.contains('recording')) {
+                // Aqui entraria a lógica de salvar os frames/vídeo
+                console.log("Gravação iniciada...");
+            } else {
+                console.log("Gravação finalizada. Processando...");
+                alert("Vídeo capturado! Vá para a aba 'Galeria 360°' para ver o resultado simulado.");
+            }
+        });
+
+        // Inicializa a câmera assim que abre o app
+        window.onload = () => {
+            startCamera();
+        };
+    </script>
+</body>
+</html>
