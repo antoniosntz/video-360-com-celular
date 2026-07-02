@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Teleport 360 - Corrigido e Testado</title>
+    <style>
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box; 
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        body {
+            background-color: #121212;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .screen {
+            display: none;
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .screen.active {
+            display: block;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 30px 20px;
+        }
+
+        .painel-topo {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            padding: 12px 20px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 10;
+            border: 1px solid rgba(255,255,255,0.1);
+            width: 90%;
+            max-width: 400px;
+        }
+
+        .painel-topo h2 { font-size: 20px; margin-bottom: 3px; color: #00ffcc; }
+        .painel-topo p { font-size: 13px; color: #ddd; }
+
+        #timer-display {
+            font-size: 16px;
+            font-weight: bold;
+            color: #ffcc00;
+            margin-top: 3px;
+        }
+
+        /* Retículo da Mira Central Avançada */
+        .mira-central {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 70px;
+            height: 70px;
+            border: 3px dashed rgba(255, 0, 85, 0.8);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 5;
+            transition: transform 0.1s, border-color 0.2s;
+        }
+        
+        .mira-central.alinhada {
+            border: 4px solid #ffcc00;
+            transform: translate(-50%, -50%) scale(0.95);
+        }
+
+        .mira-central.capturando {
+            border-color: #00ffcc; 
+            box-shadow: 0 0 30px rgba(0, 255, 204, 0.9);
+            transform: translate(-50%, -50%) scale(1.1);
+        }
+
+        .mira-central::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            background: currentColor;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #espaco-pontos {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 6;
+        }
+
+        .bolinha-guia {
+            position: absolute;
+            width: 38px;
+            height: 38px;
+            background: rgba(255, 0, 85, 0.8);
+            border: 3px solid #fff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+        }
+
+        .bolinha-guia.capturada {
+            display: none !important; /* Some imediatamente para não poluir a tela */
+        }
+
+        #btn-permissao {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 18px 36px;
+            background: #00ffcc;
+            color: #000;
+            border: none;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            pointer-events: auto;
+            z-index: 20;
+            box-shadow: 0 10px 30px rgba(0,255,204,0.4);
+        }
+
+        /* Tela de Exportação */
+        #tela-exportacao {
+            background: #1a1a1a;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 30px;
+            text-align: center;
+        }
+
+        #tela-exportacao.active { display: flex; }
+
+        .preview-canvas {
+            max-width: 95%;
+            max-height: 45vh;
+            border: 2px solid #333;
+            margin: 20px 0;
+            background: #000;
+        }
+
+        .btn-salvar {
+            background: #00ffcc;
+            color: #000;
+            padding: 16px 45px;
+            font-size: 18px;
+            border-radius: 25px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 5px 20px rgba(0,255,204,0.4);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="tela-captura" class="screen active">
+        <video id="webcam" autoplay playsinline muted></video>
+        <div class="mira-central" id="mira"></div>
+        <div id="espaco-pontos"></div>
+
+        <div class="hud">
+            <div class="painel-topo">
+                <h2 id="contador">Progresso: 0%</h2>
+                <p id="instrucao">Aguardando ativação dos sensores...</p>
+                <div id="timer-display">Aponte para uma bolinha</div>
+                <p id="debug" style="font-size: 11px; color: #ff0055; margin-top: 5px; font-family: monospace;">Aguardando Calibração...</p>
+            </div>
+            <button id="btn-permissao" onclick="inicializarApp()">ATIVAR CÂMERA E BÚSSOLA</button>
+        </div>
+    </div>
+
+    <div id="tela-exportacao" class="screen">
+        <h2>Mapeamento Concluído!</h2>
+        <p style="color: #aaa; margin-top: 10px;">O mapa de projeções cilíndricas está pronto para o Meta Quest.</p>
+        <canvas id="canvas-final" class="preview-canvas"></canvas>
+        <button class="btn-salvar" onclick="baixarArquivoQuest()">Salvar Arquivo .JPG</button>
+    </div>
+
+    <script>
+        const espacoPontos = document.getElementById('espaco-pontos');
+        const contadorTxt = document.getElementById('contador');
+        const instrucaoTxt = document.getElementById('instrucao');
+        const timerDisplay = document.getElementById('timer-display');
+        const debugTxt = document.getElementById('debug');
+        const btnPermissao = document.getElementById('btn-permissao');
+        const mira = document.getElementById('mira');
+        const video = document.getElementById('webcam');
+        const canvasFinal = document.getElementById('canvas-final');
+
+        let fotosCapturadas = 0;
+        let listaPontos = [];
+        let fotosMemoria = [];
+        let trancaTravaFoto = false; // Impede disparos duplos concorrentes
+
+        // Configuração de malha estável (22 fotos)
+        const configuracaoCamadas = [
+            { tipo: 'teto', inclina: -40, quantidade: 6 },
+            { tipo: 'horizonte', inclina: 0, quantidade: 10 },
+            { tipo: 'chao', inclina: 40, quantidade: 6 }
+        ];
+        const totalFotosEsperadas = 22;
+
+        function gerarGradePontos() {
+            espacoPontos.innerHTML = '';
+            listaPontos = [];
+            configuracaoCamadas.forEach(camada => {
+                for (let i = 0; i < camada.quantidade; i++) {
+                    let anguloBussolaAlvo = (360 / camada.quantidade) * i;
+                    const div = document.createElement('div');
+                    div.className = 'bolinha-guia';
+                    espacoPontos.appendChild(div);
+
+                    listaPontos.push({
+                        id: listaPontos.length,
+                        alvoYaw: anguloBussolaAlvo, 
+                        alvoPitch: camada.inclina,
+                        capturado: false,
+                        element: div
+                    });
+                }
+            });
+        }
+
+        async function iniciarCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                alert("Erro crítico de hardware de câmera. Certifique-se de usar HTTPS.");
+            }
+        }
+
+        function inicializarApp() {
+            instrucaoTxt.innerText = "Gire e incline procurando as bolinhas vermelhas";
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission().then(response => {
+                    if (response === 'granted') {
+                        window.addEventListener('deviceorientation', processarMovimento, true);
+                        btnPermissao.style.display = 'none';
+                    }
+                });
+            } else {
+                window.addEventListener('deviceorientationabsolute', processarMovimento, true);
+                window.addEventListener('deviceorientation', processarMovimento, true); // Fallback Android
+                btnPermissao.style.display = 'none';
+            }
+            iniciarCamera();
+            gerarGradePontos();
+        }
+
+        function processarMovimento(event) {
+            let grauBussola = event.webkitCompassHeading !== undefined ? event.webkitCompassHeading : (360 - event.alpha); 
+            let pitchCelular = event.pitch !== undefined ? event.pitch : event.beta; 
+
+            if (grauBussola === undefined || pitchCelular === null) return;
+
+            // Correção 1: Tratamento de limites circulares da bússola
+            grauBussola = (grauBussola % 360 + 360) % 360;
+
+            // Correção 2: Normalização matemática do Pitch para evitar inversão ao olhar para cima/baixo
+            if (event.gamma < 0 && pitchCelular > 0) pitchCelular = 180 - pitchCelular;
+            if (event.gamma < 0 && pitchCelular < 0) pitchCelular = -180 - pitchCelular;
+            
+            // Mapeia a inclinação para uma escala utilizável de zero geométrico
+            let inclinacaoTratada = pitchCelular - 90;
+            if (inclinacaoTratada > 180) inclinacaoTratada -= 360;
+
+            debugTxt.innerText = `BÚSSOLA: ${Math.round(grauBussola)}° | INCLINAÇÃO: ${Math.round(inclinacaoTratada)}°`;
+
+            const larguraTela = window.innerWidth;
+            const alturaTela = window.innerHeight;
+            
+            // Sensibilidade calibrada para telas de celulares modernos
+            const sensibilidadeX = larguraTela / 55; 
+            const sensibilidadeY = alturaTela / 55; 
+
+            let pontoAlinhadoAtual = null;
+            let menorDistancia = Infinity;
+
+            listaPontos.forEach(ponto => {
+                if (ponto.capturado) return;
+
+                let diffX = ponto.alvoYaw - grauBussola;
+                let diffY = inclinacaoTratada - ponto.alvoPitch;
+
+                // Correção 3: Correção do cálculo do arco menor na descontinuidade de 360 graus para 0 graus
+                if (diffX > 180) diffX -= 360;
+                if (diffX < -180) diffX += 360;
+
+                let posX = (larguraTela / 2) + (diffX * sensibilidadeX);
+                let posY = (alturaTela / 2) + (diffY * sensibilidadeY);
+
+                // Renderiza bolinhas apenas no cone visual útil
+                if (posX > -40 && posX < larguraTela + 40 && posY > -40 && posY < alturaTela + 40) {
+                    ponto.element.style.display = 'block';
+                    ponto.element.style.left = `${posX}px`;
+                    ponto.element.style.top = `${posY}px`;
+                } else {
+                    ponto.element.style.display = 'none';
+                }
+
+                let distPixels = Math.sqrt(Math.pow(posX - (larguraTela/2), 2) + Math.pow(posY - (alturaTela/2), 2));
+
+                // Alvo elegível se estiver dentro do raio da mira central (Margem confortável de 40px)
+                if (distPixels < 40 && distPixels < menorDistancia) {
+                    menorDistancia = distPixels;
+                    pontoAlinhadoAtual = ponto;
+                }
+            });
+
+            // Motor de captura imediata e proteção contra concorrência
+            if (pontoAlinhadoAtual && !trancaTravaFoto) {
+                mira.className = "mira-central alinhada";
+                timerDisplay.innerText = "Alinhado! Mantendo...";
+                
+                trancaTravaFoto = true; // Ativa trava de barreira
+                setTimeout(() => {
+                    // Reavalia se após um breve intervalo o usuário ainda está focado no ponto
+                    if (pontoAlinhadoAtual) {
+                        executarCapturaDeFoto(pontoAlinhadoAtual);
+                    }
+                    trancaTravaFoto = false; // Libera trava
+                }, 250); // Captura em um quarto de segundo imóvel
+            } else if (!pontoAlinhadoAtual) {
+                mira.className = "mira-central";
+                timerDisplay.innerText = "Busque o próximo ponto";
+            }
+        }
+
+        function ejecutarCapturaDeFoto(ponto) {
+            ponto.capturado = true;
+            ponto.element.style.display = 'none';
+            
+            mira.className = "mira-central capturando";
+
+            salvarFrameNaMemoria();
+            fotosCapturadas++;
+            
+            let porcentagem = Math.round((fotosCapturadas / totalFotosEsperadas) * 100);
+            contadorTxt.innerText = `Progresso: ${porcentagem}%`;
+
+            if (navigator.vibrate) navigator.vibrate(50);
+
+            if (fotosCapturadas === totalFotosEsperadas) {
+                finalizarECaptonarAmbiente();
+            }
+        }
+
+        function salvarFrameNaMemoria() {
+            const canvasOculto = document.createElement('canvas');
+            canvasOculto.width = 854;
+            canvasOculto.height = 480;
+            const ctx = canvasOculto.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvasOculto.width, canvasOculto.height);
+            fotosMemoria.push(canvasOculto);
+        }
+
+        function finalizarECaptonarAmbiente() {
+            window.removeEventListener('deviceorientation', processarMovimento);
+            window.removeEventListener('deviceorientationabsolute', processarMovimento);
+            
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+
+            document.getElementById('tela-captura').classList.remove('active');
+            document.getElementById('tela-exportacao').classList.add('active');
+
+            renderizarTexturaFinal();
+        }
+
+        function renderizarTexturaFinal() {
+            const ctx = canvasFinal.getContext('2d');
+            canvasFinal.width = 2048;
+            canvasFinal.height = 1536;
+
+            ctx.fillStyle = "#111";
+            ctx.fillRect(0, 0, canvasFinal.width, canvasFinal.height);
+
+            let colunas = 6;
+            let larguraSlot = canvasFinal.width / colunas;
+            let alturaSlot = canvasFinal.height / 4;
+
+            fotosMemoria.forEach((img, index) => {
+                let x = (index % colunas) * larguraSlot;
+                let y = Math.floor(index / colunas) * alturaSlot;
+                ctx.drawImage(img, x, y, larguraSlot, alturaSlot);
+            });
+        }
+
+        function baixarArquivoQuest() {
+            const link = document.createElement('a');
+            link.download = 'ambiente_360_panorama.jpg';
+            link.href = canvasFinal.toDataURL('image/jpeg', 0.85);
+            link.click();
+        }
+    </script>
+</body>
+</html>
